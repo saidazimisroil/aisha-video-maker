@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     tts_poll_interval: int = Field(3, alias="TTS_POLL_INTERVAL")
     tts_poll_max: int = Field(40, alias="TTS_POLL_MAX")
 
+    # --- Audio library (Aisha TTS history proxy) ------------------------- #
+    # Default page size when the dashboard browses the account's TTS history.
+    audio_page_size: int = Field(12, alias="AUDIO_PAGE_SIZE")
+    # Optional override for the account-balance endpoint path (relative to the
+    # Aisha base). Empty = run a best-effort probe and hide the widget if none
+    # of the candidates answer. Set this once you know the real path.
+    aisha_balance_path: str = Field("", alias="AISHA_BALANCE_PATH")
+
+    # How long a "build from existing audios" session may sit in AWAITING_PAIRS
+    # (slides rendered, waiting for the user to pick audios) before cleanup reaps
+    # it. Longer than a normal job so the user has time to pair.
+    reuse_prepare_ttl_hours: int = Field(6, alias="REUSE_PREPARE_TTL_HOURS")
+
     # --- Limits / safety ------------------------------------------------- #
     max_upload_mb: int = Field(25, alias="MAX_UPLOAD_MB")
     max_slides: int = Field(40, alias="MAX_SLIDES")
@@ -71,6 +84,11 @@ class Settings(BaseSettings):
     @property
     def sessions_root(self) -> Path:
         return self.data_dir / "sessions"
+
+    @property
+    def db_file(self) -> Path:
+        """SQLite history DB, a sibling of the sessions/ folder under DATA_DIR."""
+        return self.data_dir / "aisha.db"
 
 
 @lru_cache

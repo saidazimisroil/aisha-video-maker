@@ -4,7 +4,8 @@
       "PowerShell(python build_video.py --out output.mp4)",
       "PowerShell(Start-Process \"c:\\\\Users\\\\saida\\\\aisha-video-maker\\\\output.mp4\")",
       "PowerShell(python --version)",
-      "PowerShell(pip install -r requirements.txt)"
+      "PowerShell(pip install -r requirements.txt)",
+      "PowerShell(cd 'c:\\\\Users\\\\saida\\\\aisha-video-maker'; $env:AISHA_API_KEY = 'test_import_only'; python -c \"import app.main; print\\('main import ok'\\); import app.db, app.aisha, app.jobs, app.sessions, app.schemas, app.pipeline; print\\('all modules import ok'\\)\")"
     ]
   }
 }

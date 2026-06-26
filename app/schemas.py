@@ -1,14 +1,15 @@
-"""schemas.py - Enums and Pydantic response models for the API.
+"""schemas.py - Enums and Pydantic models for the API.
 
-Request options arrive as multipart form fields (they accompany the pptx upload),
-so they are validated inline in ``main.py`` with FastAPI ``Form(...)`` constraints
-plus the enums below. These models shape the JSON responses the frontend reads.
+Request options for the create flows arrive as multipart form fields (they accompany the
+pptx upload), so they are validated inline in ``main.py`` with FastAPI ``Form(...)``
+constraints plus the enums below. JSON request bodies (rename, reuse pairs) and every JSON
+response are shaped by the models here.
 """
 
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Language(str, Enum):
@@ -42,11 +43,14 @@ class Progress(BaseModel):
 class CreateSessionResponse(BaseModel):
     session_id: str
     status: str
+    kind: str = "tts"
 
 
 class StatusResponse(BaseModel):
     session_id: str
     status: str
+    title: Optional[str] = None
+    kind: str = "tts"
     slide_count: Optional[int] = None
     progress: Optional[Progress] = None
     has_output: bool = False
@@ -56,16 +60,80 @@ class StatusResponse(BaseModel):
 
 class SessionSummary(BaseModel):
     session_id: str
+    title: Optional[str] = None
+    kind: str = "tts"
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     status: Optional[str] = None
     slide_count: Optional[int] = None
+    duration: Optional[float] = None
     has_output: bool = False
     error: Optional[str] = None
 
 
 class SessionList(BaseModel):
-    count: int
+    count: int            # total matching (across all pages)
+    page: int = 1
+    limit: int = 20
     results: List[SessionSummary]
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+
+
+# --------------------------------------------------------------------------- #
+# Audio library (proxied Aisha TTS history)
+# --------------------------------------------------------------------------- #
+class AudioRecord(BaseModel):
+    # The upstream /tts/get/ schema is undocumented, so stay lenient: every field is
+    # optional and unknown upstream keys are preserved (extra="allow").
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    audio_url: Optional[str] = None
+    transcript: Optional[str] = None
+    language: Optional[str] = None
+    status: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class AudioList(BaseModel):
+    count: Optional[int] = None
+    page: int = 1
+    limit: int = 12
+    results: List[AudioRecord]
+
+
+# --------------------------------------------------------------------------- #
+# Build from existing audios
+# --------------------------------------------------------------------------- #
+class ReusePair(BaseModel):
+    slide_index: int = Field(..., ge=1)
+    audio_id: Optional[str] = None
+    audio_url: str = Field(..., min_length=1)
+
+
+class ReuseBuildRequest(BaseModel):
+    pairs: List[ReusePair] = Field(..., min_length=1)
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard
+# --------------------------------------------------------------------------- #
+class StatsResponse(BaseModel):
+    total: int
+    by_status: dict
+    by_kind: dict
+    total_duration: float
+    total_slides: int
+    queue_depth: int
+
+
+class AccountResponse(BaseModel):
+    available: bool
+    balance: Optional[float] = None
+    raw: Optional[dict] = None
 
 
 class HealthResponse(BaseModel):

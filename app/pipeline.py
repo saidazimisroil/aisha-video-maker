@@ -338,6 +338,14 @@ def _poll_status(tts_id, headers, interval, max_attempts):
         f"TTS job {tts_id} did not finish within {interval * max_attempts}s.")
 
 
+def download_audio(url, audio_dir, idx, headers):
+    """Public wrapper: download one already-synthesized clip to ``audio_dir/slide_NN.<ext>``.
+
+    Used by the "build from existing audios" flow, which pairs slides with clips already in
+    the Aisha TTS history (no new synthesis, no balance spent)."""
+    return _download_audio(url, audio_dir, idx, headers)
+
+
 def _download_audio(url, audio_dir, idx, headers):
     try:
         resp = requests.get(url, headers=headers, timeout=120)
