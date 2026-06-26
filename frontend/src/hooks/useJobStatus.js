@@ -38,10 +38,12 @@ export function useJobStatus(sessionId, { enabled = true, onDone } = {}) {
       if (res.status === 404 || res.status === 410) {
         if (!cancelled) {
           stop();
-          setState((s) => ({
-            ...s, expired: true, status: "FAILED",
-            error: "This session has expired or is no longer available.",
-          }));
+          const error =
+            "The job disappeared — the server most likely restarted mid-build. On " +
+            "Render's free tier storage is wiped on every restart, so the in-progress " +
+            "video is lost. Try again, and download it as soon as it's ready.";
+          setState((s) => ({ ...s, expired: true, status: "FAILED", error }));
+          if (onDoneRef.current) onDoneRef.current({ status: "FAILED", error, expired: true });
         }
         return;
       }
