@@ -119,14 +119,35 @@ function stopPolling() {
 }
 
 async function poll(sessionId) {
+  let res;
+  try {
+    res = await fetch(`${API}/api/sessions/${sessionId}/status`);
+  } catch (err) {
+    // No response at all (offline / DNS / reset) — transient, keep polling.
+    return;
+  }
+
+  // 404/410 means the session is gone for good: it expired, or the server was
+  // restarted and its ephemeral disk was wiped. Stop and tell the user instead
+  // of polling a vanished session forever.
+  if (res.status === 404 || res.status === 410) {
+    stopPolling();
+    showResult(
+      sessionId,
+      { error: "This video session has expired or is no longer available. Please create the video again." },
+      true
+    );
+    return;
+  }
+
+  // Other non-OK (e.g. 5xx) — treat as transient and keep polling.
+  if (!res.ok) return;
+
   let meta;
   try {
-    const res = await fetch(`${API}/api/sessions/${sessionId}/status`);
-    if (!res.ok) throw new Error(`Status check failed (${res.status}).`);
     meta = await res.json();
   } catch (err) {
-    // transient network blip — keep polling
-    return;
+    return; // malformed body — transient, keep polling
   }
 
   const { status, progress } = meta;

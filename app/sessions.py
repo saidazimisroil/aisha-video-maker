@@ -31,6 +31,11 @@ SUCCESS = "SUCCESS"
 FAILED = "FAILED"
 # States that mean "a worker was mid-run" — swept to FAILED on startup.
 IN_FLIGHT = {RENDERING, SYNTHESIZING, ASSEMBLING}
+# Non-terminal states left over from a previous instance. The job queue is
+# in-process (jobs.py), so on restart it is empty: a PENDING job will never be
+# picked up and an IN_FLIGHT job has no worker running it. Both are swept to
+# FAILED on startup so the UI never polls a job that can never progress.
+UNRESUMABLE = IN_FLIGHT | {PENDING}
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -199,16 +204,18 @@ def cleanup_old(max_age_hours: Optional[int] = None,
 
 
 def sweep_interrupted() -> int:
-    """Mark any session left mid-run (from a previous instance) as FAILED so the
-    UI never polls a job that no worker is running. Returns how many were swept."""
+    """Mark any session left queued or mid-run (from a previous instance) as
+    FAILED so the UI never polls a job that can never progress — the in-process
+    queue is empty after a restart, so PENDING jobs are orphaned just like
+    IN_FLIGHT ones. Returns how many were swept."""
     swept = 0
     for child in sessions_root().iterdir():
         if not child.is_dir() or not _valid_id(child.name):
             continue
         meta = read_meta(child.name)
-        if meta and meta.get("status") in IN_FLIGHT:
+        if meta and meta.get("status") in UNRESUMABLE:
             set_status(child.name, FAILED,
-                       error="Processing was interrupted (server restarted). "
+                       error="The server restarted before this video finished. "
                              "Please create the video again.")
             swept += 1
     return swept

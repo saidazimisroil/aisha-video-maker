@@ -6,4 +6,5 @@
 //
 // On Vercel/Netlify you can also leave a sensible default here and override it
 // with a build-time find/replace, or just commit the production URL.
-window.API_BASE = "http://localhost:8000";
+// window.API_BASE = "http://localhost:8000";
+window.API_BASE = "https://aisha-video-maker.onrender.com";
