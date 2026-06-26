@@ -1,0 +1,19 @@
+# Keep the build context (and image) small + free of local artifacts/secrets.
+.git
+.gitignore
+.claude
+.env
+.venv
+venv
+__pycache__/
+*.pyc
+build/
+data/
+frontend/
+output.mp4
+*.mp4
+presentation.pptx
+script.txt
+README.md
+*.md
+.plans

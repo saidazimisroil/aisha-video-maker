@@ -1,0 +1,46 @@
+# Render.com Blueprint. Deploy with: New + > Blueprint, point at this repo.
+# Set AISHA_API_KEY (and AISHA_ALLOWED_ORIGINS) in the dashboard — they are
+# marked `sync: false` so they are never committed to the repo.
+#
+# Free plan notes: 512 MB RAM / 0.1 CPU, EPHEMERAL disk (generated videos do NOT
+# survive a redeploy/restart/spin-down), spins down after ~15 min idle (~1 min
+# cold start). For persistence, switch to a paid plan and add a `disks:` block
+# (see README), or upload finished videos to object storage.
+services:
+  - type: web
+    name: aisha-video-maker
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: AISHA_API_KEY
+        sync: false                 # secret — set in the dashboard
+      - key: AISHA_ALLOWED_ORIGINS
+        sync: false                 # e.g. https://your-frontend.vercel.app
+      - key: DATA_DIR
+        value: /app/data
+      - key: DEFAULT_HEIGHT
+        value: "720"
+      - key: DEFAULT_FPS
+        value: "24"
+      - key: DEFAULT_SPEED
+        value: "0.75"
+      - key: MAX_UPLOAD_MB
+        value: "25"
+      - key: MAX_SLIDES
+        value: "40"
+      - key: MAX_QUEUE
+        value: "3"
+      - key: SESSION_MAX_AGE_HOURS
+        value: "24"
+      - key: SESSION_MAX_COUNT
+        value: "50"
+
+# --- Persistence (paid plans only) -----------------------------------------
+# Uncomment to keep videos across restarts (requires Starter+ and removes the
+# free plan). DATA_DIR above already points at the mount path.
+#    disks:
+#      - name: data
+#        mountPath: /app/data
+#        sizeGB: 1

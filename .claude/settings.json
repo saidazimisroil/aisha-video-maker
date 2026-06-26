@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python build_video.py --out output.mp4)",
+      "PowerShell(Start-Process \"c:\\\\Users\\\\saida\\\\aisha-video-maker\\\\output.mp4\")",
+      "PowerShell(python --version)",
+      "PowerShell(pip install -r requirements.txt)"
+    ]
+  }
+}
