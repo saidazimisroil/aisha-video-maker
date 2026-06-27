@@ -173,7 +173,7 @@ export default function CreateVideo() {
           </div>
           <div className="field">
             <label htmlFor="fps">Frame rate</label>
-            <input type="number" id="fps" name="fps" defaultValue={24} min={12} max={30} />
+            <input type="number" id="fps" name="fps" defaultValue={12} min={6} max={30} />
           </div>
           <div className="field">
             <label htmlFor="speed">Speech speed <small>(uz only)</small></label>
