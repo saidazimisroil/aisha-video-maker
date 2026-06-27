@@ -269,42 +269,71 @@ def synthesize(segments, api_key, audio_dir, mood="Neutral", language="uz",
     total = len(segments)
 
     for idx, transcript in enumerate(segments, start=1):
-        # Per the Aisha docs, model/mood/speed apply only to the uz (Gulnoza)
-        # stream; en/ru must not send them.
-        data = {"transcript": transcript, "language": language}
-        if language == "uz":
-            data["model"] = model
-            data["mood"] = mood
-            data["speed"] = speed
-
+        # synthesize_one does the POST + async poll; wrap its error with the slide
+        # number so a failure points the user at the offending narration part.
         try:
-            resp = requests.post(TTS_POST_URL, headers=headers, data=data, timeout=120)
-        except requests.RequestException as e:
-            raise PipelineError(f"Slide {idx}: could not reach the TTS service ({e}).")
-        body = _safe_json(resp)
-
-        if resp.status_code == 201:
-            audio_remote = body.get("audio_path")
-        elif resp.status_code == 202:
-            audio_remote = _poll_status(body.get("id"), headers,
-                                        poll_interval, poll_max)
-        else:
-            msg = POST_ERRORS.get(resp.status_code,
-                                  f"Unexpected response ({resp.status_code}).")
-            raise PipelineError(
-                f"Slide {idx}: {msg}\n"
-                f"{json.dumps(body, ensure_ascii=False)}")
-
-        if not audio_remote:
-            raise PipelineError(
-                f"Slide {idx}: the TTS API returned no audio path.\n"
-                f"{json.dumps(body, ensure_ascii=False)}")
+            audio_remote, _ = synthesize_one(
+                transcript, api_key, language=language, model=model, mood=mood,
+                speed=speed, poll_interval=poll_interval, poll_max=poll_max)
+        except PipelineError as e:
+            raise PipelineError(f"Slide {idx}: {e}")
 
         local = _download_audio(media_url(audio_remote), audio_dir, idx, headers)
         audio_paths.append(local)
         if progress_cb:
             progress_cb(idx, total)
     return audio_paths
+
+
+def synthesize_one(transcript, api_key, language="uz", model="Gulnoza",
+                   mood="Neutral", speed=0.75, poll_interval=3, poll_max=40):
+    """POST a single transcript to the Aisha TTS API and return its *remote* audio path.
+
+    Returns ``(audio_path, body)`` where ``audio_path`` is the upstream-relative path
+    (run it through :func:`media_url` to get a fetchable URL) and ``body`` is the parsed
+    JSON response, so callers can read ``id`` / ``status`` / ``created_at``.
+
+    Handles both the synchronous (201) and async (202 → poll) responses and maps the
+    documented upstream error codes to :class:`PipelineError`. Enforces the Aisha
+    ``CHAR_LIMIT`` up front so balance is never spent on text that would be rejected.
+
+    This is the single-clip core shared by the video pipeline's batch :func:`synthesize`
+    and the dashboard's standalone "generate audio" endpoint.
+    """
+    if len(transcript) > CHAR_LIMIT:
+        raise PipelineError(
+            f"The text is {len(transcript)} characters, over the {CHAR_LIMIT}-character "
+            f"limit. Shorten it.")
+
+    headers = {"X-Api-Key": api_key}
+    # Per the Aisha docs, model/mood/speed apply only to the uz (Gulnoza) stream;
+    # en/ru must not send them.
+    data = {"transcript": transcript, "language": language}
+    if language == "uz":
+        data["model"] = model
+        data["mood"] = mood
+        data["speed"] = speed
+
+    try:
+        resp = requests.post(TTS_POST_URL, headers=headers, data=data, timeout=120)
+    except requests.RequestException as e:
+        raise PipelineError(f"Could not reach the TTS service ({e}).")
+    body = _safe_json(resp)
+
+    if resp.status_code == 201:
+        audio_remote = body.get("audio_path")
+    elif resp.status_code == 202:
+        audio_remote = _poll_status(body.get("id"), headers, poll_interval, poll_max)
+    else:
+        msg = POST_ERRORS.get(resp.status_code,
+                              f"Unexpected response ({resp.status_code}).")
+        raise PipelineError(f"{msg}\n{json.dumps(body, ensure_ascii=False)}")
+
+    if not audio_remote:
+        raise PipelineError(
+            f"The TTS API returned no audio path.\n{json.dumps(body, ensure_ascii=False)}")
+
+    return audio_remote, body
 
 
 def _safe_json(resp):

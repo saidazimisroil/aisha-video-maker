@@ -26,7 +26,7 @@ from app import aisha, db, sessions
 from app.config import settings
 from app.jobs import QueueFull, manager
 from app.jobs import REUSE_BUILD, REUSE_PREPARE, TTS
-from app.pipeline import find_soffice, find_tool
+from app.pipeline import CHAR_LIMIT, PipelineError, find_soffice, find_tool
 from app.schemas import (
     ALLOWED_HEIGHTS,
     FPS_MAX,
@@ -45,6 +45,8 @@ from app.schemas import (
     SessionList,
     StatsResponse,
     StatusResponse,
+    TTSCreateRequest,
+    TTSCreateResponse,
 )
 
 logging.basicConfig(
@@ -306,6 +308,40 @@ def stream_audio(url: str):
         raise HTTPException(502, "Could not fetch the audio clip.")
     return Response(content=content, media_type=ctype,
                     headers={"Cache-Control": "public, max-age=3600"})
+
+
+# --------------------------------------------------------------------------- #
+# Text-to-speech (single clip) — type text, get one audio file (≤ CHAR_LIMIT chars)
+# --------------------------------------------------------------------------- #
+@app.post("/api/tts", response_model=TTSCreateResponse)
+def synthesize_text(body: TTSCreateRequest):
+    """Synthesize one piece of text (≤ ``CHAR_LIMIT`` characters) to a single audio clip.
+
+    Synchronous: the Aisha POST usually returns the clip immediately (201); a 202 is polled
+    server-side. The response carries a proxy-ready ``audio_url`` the browser streams via
+    ``/api/audios/stream``.
+    """
+    transcript = (body.transcript or "").strip()
+    if not transcript:
+        raise HTTPException(400, "Please enter some text to generate audio.")
+    if len(transcript) > CHAR_LIMIT:
+        raise HTTPException(
+            400, f"The text is {len(transcript)} characters, over the "
+                 f"{CHAR_LIMIT}-character limit. Shorten it.")
+    if not (body.speed == 0 or SPEED_MIN <= body.speed <= SPEED_MAX):
+        raise HTTPException(
+            400, f"speed must be 0 (default) or between {SPEED_MIN} and {SPEED_MAX}.")
+
+    try:
+        rec = aisha.create_tts(
+            transcript=transcript, language=body.language.value,
+            model=(body.model or "Gulnoza"), mood=body.mood.value, speed=body.speed)
+    except PipelineError as e:
+        raise HTTPException(502, str(e))
+    except requests.RequestException:
+        raise HTTPException(502, "Could not reach the Aisha TTS service.")
+    log.info("Synthesized a %d-char %s clip", len(transcript), body.language.value)
+    return TTSCreateResponse(**rec)
 
 
 # --------------------------------------------------------------------------- #

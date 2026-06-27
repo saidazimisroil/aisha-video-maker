@@ -21,6 +21,9 @@ export const listAudios = (params) => apiGet(`/api/audios${qs(params)}`);
 export const audioStreamUrl = (url) =>
   apiUrl(`/api/audios/stream?url=${encodeURIComponent(url)}`);
 
+// ---- Text to speech (single clip, ≤1000 chars) ---------------------------
+export const createTts = (body) => apiPostJson(`/api/tts`, body);
+
 // ---- Dashboard ------------------------------------------------------------
 export const getStats = () => apiGet(`/api/stats`);
 export const getAccount = () => apiGet(`/api/account`);

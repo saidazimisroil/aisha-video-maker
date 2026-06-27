@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const LINKS = [
   { to: "/", icon: "📊", label: "Overview", end: true },
   { to: "/create", icon: "🎬", label: "Create Video" },
+  { to: "/tts", icon: "🔊", label: "Generate Audio" },
   { to: "/audios", icon: "🎧", label: "Audio Library" },
   { to: "/build", icon: "🧩", label: "Build From Audio" },
   { to: "/history", icon: "🗂️", label: "Video History" },

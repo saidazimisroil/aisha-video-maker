@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 import requests
 
 from app.config import settings
-from app.pipeline import BASE, media_url
+from app.pipeline import BASE, media_url, synthesize_one
 
 log = logging.getLogger("aisha.client")
 
@@ -91,6 +91,35 @@ def list_tts(page: int = 1, limit: int = 12, search: str = None,
         "page": page,
         "limit": limit,
         "results": [normalize_record(r) for r in items],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Text-to-speech (single clip) — synthesize one piece of text for the dashboard
+# --------------------------------------------------------------------------- #
+def create_tts(transcript: str, language: str = "uz", model: str = "Gulnoza",
+               mood: str = "Neutral", speed: float = 0.75) -> dict:
+    """Synthesize one piece of text and return a record shaped like :func:`normalize_record`.
+
+    Delegates the POST + async poll + ``CHAR_LIMIT`` guard to the video pipeline's
+    :func:`synthesize_one`, then exposes only a proxy-ready ``audio_url`` so the browser can
+    stream the clip through ``/api/audios/stream`` without ever seeing the API key.
+
+    Raises ``PipelineError`` (user-facing message) on bad input or an upstream failure; the
+    route maps it to an HTTP error.
+    """
+    audio_remote, body = synthesize_one(
+        transcript, settings.aisha_api_key, language=language, model=model,
+        mood=mood, speed=speed,
+        poll_interval=settings.tts_poll_interval, poll_max=settings.tts_poll_max)
+    rec = body if isinstance(body, dict) else {}
+    return {
+        "id": str(rec["id"]) if rec.get("id") is not None else None,
+        "audio_url": media_url(audio_remote),
+        "transcript": transcript,
+        "language": language,
+        "status": rec.get("status") or "SUCCESS",
+        "created_at": rec.get("created_at") or rec.get("created") or rec.get("date"),
     }
 
 

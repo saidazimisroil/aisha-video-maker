@@ -106,6 +106,28 @@ class AudioList(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Text-to-speech (single clip)
+# --------------------------------------------------------------------------- #
+class TTSCreateRequest(BaseModel):
+    # The 1000-character cap (the Aisha CHAR_LIMIT) and speed range are enforced in the
+    # route with friendly messages, mirroring the create-video flow's inline validation.
+    transcript: str
+    language: Language = Language.uz
+    mood: Mood = Mood.Neutral
+    model: str = "Gulnoza"
+    speed: float = 0.75
+
+
+class TTSCreateResponse(BaseModel):
+    id: Optional[str] = None
+    audio_url: Optional[str] = None
+    transcript: str
+    language: str
+    status: str = "SUCCESS"
+    created_at: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
 # Build from existing audios
 # --------------------------------------------------------------------------- #
 class ReusePair(BaseModel):
