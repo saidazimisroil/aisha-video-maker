@@ -15,14 +15,16 @@ All job metadata lives in SQLite (db.py); the UI polls ``/status`` and lists ``/
 """
 
 import logging
+import secrets
+import uuid
 from contextlib import asynccontextmanager
 
 import requests
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
-from app import aisha, db, sessions
+from app import aisha, auth_routes, db, security, sessions
 from app.config import settings
 from app.jobs import QueueFull, manager
 from app.jobs import REUSE_BUILD, REUSE_PREPARE, TTS
@@ -58,6 +60,38 @@ log = logging.getLogger("aisha.main")
 PPTX_MAGIC = b"PK\x03\x04"  # pptx is a zip container
 CHUNK = 1024 * 1024
 
+# Reusable guard: every app endpoint below requires a logged-in user (any role).
+AUTH = [Depends(security.get_current_user)]
+
+
+def bootstrap_super_admin() -> None:
+    """Seed a single super_admin on first run (when the users table is empty).
+
+    Uses ``BOOTSTRAP_ADMIN_USERNAME`` / ``BOOTSTRAP_ADMIN_PASSWORD``; if the password is
+    unset, a strong one is generated and logged once so the operator can grab it and change it.
+    """
+    if db.count_users() > 0:
+        return
+    username = (settings.bootstrap_admin_username or "superadmin").strip()
+    password = settings.bootstrap_admin_password
+    generated = False
+    if not password:
+        password = secrets.token_urlsafe(12)
+        generated = True
+    db.insert_user({
+        "id": uuid.uuid4().hex,
+        "username": username,
+        "password_hash": security.hash_password(password),
+        "role": "super_admin",
+    })
+    if generated:
+        log.warning(
+            "Bootstrapped super_admin '%s' with a GENERATED password: %s  "
+            "(log in and change it; set BOOTSTRAP_ADMIN_PASSWORD to avoid this).",
+            username, password)
+    else:
+        log.info("Bootstrapped super_admin '%s' from configuration.", username)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,6 +100,10 @@ async def lifespan(app: FastAPI):
     migrated = db.migrate_legacy_meta()
     if migrated:
         log.info("Imported %d legacy session(s) into SQLite.", migrated)
+    purged = db.purge_expired_auth_sessions()
+    if purged:
+        log.info("Purged %d expired auth session(s).", purged)
+    bootstrap_super_admin()
     swept = sessions.sweep_interrupted()
     if swept:
         log.info("Swept %d interrupted session(s) to FAILED.", swept)
@@ -76,7 +114,13 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Aisha Video Maker", version="2.0.0", lifespan=lifespan)
+# Hide the interactive docs/schema from normal & unauthenticated users unless explicitly
+# enabled (AISHA_DOCS_ENABLED=true) in a trusted environment.
+_docs = dict(docs_url="/docs", redoc_url="/redoc", openapi_url="/openapi.json") \
+    if settings.docs_enabled else dict(docs_url=None, redoc_url=None, openapi_url=None)
+
+app = FastAPI(title="Aisha Video Maker", version="2.0.0", lifespan=lifespan, **_docs)
+app.include_router(auth_routes.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,7 +202,8 @@ def _clean_title(title: str | None) -> str | None:
 # --------------------------------------------------------------------------- #
 # Create a session (upload + enqueue) — classic TTS flow
 # --------------------------------------------------------------------------- #
-@app.post("/api/sessions", response_model=CreateSessionResponse, status_code=202)
+@app.post("/api/sessions", response_model=CreateSessionResponse, status_code=202,
+          dependencies=AUTH)
 async def create_session(
     pptx: UploadFile = File(...),
     script: str = Form(...),
@@ -208,7 +253,7 @@ async def create_session(
 # Build from existing audios — two-step (prepare → pair → build)
 # --------------------------------------------------------------------------- #
 @app.post("/api/sessions/reuse/prepare", response_model=CreateSessionResponse,
-          status_code=202)
+          status_code=202, dependencies=AUTH)
 async def reuse_prepare(
     pptx: UploadFile = File(...),
     title: str = Form(None),
@@ -242,7 +287,7 @@ async def reuse_prepare(
 
 
 @app.post("/api/sessions/{session_id}/reuse/build",
-          response_model=CreateSessionResponse, status_code=202)
+          response_model=CreateSessionResponse, status_code=202, dependencies=AUTH)
 def reuse_build(session_id: str, body: ReuseBuildRequest):
     meta = _require_session(session_id)
     if meta.get("kind") != "reuse":
@@ -269,7 +314,7 @@ def reuse_build(session_id: str, body: ReuseBuildRequest):
         session_id=session_id, status=sessions.PENDING, kind="reuse")
 
 
-@app.get("/api/sessions/{session_id}/slides/{n}.png")
+@app.get("/api/sessions/{session_id}/slides/{n}.png", dependencies=AUTH)
 def get_slide(session_id: str, n: int):
     """Serve a rendered slide thumbnail (1-based) for the reuse pairing UI."""
     _require_session(session_id)
@@ -284,7 +329,7 @@ def get_slide(session_id: str, n: int):
 # --------------------------------------------------------------------------- #
 # Audio library (proxied Aisha TTS history)
 # --------------------------------------------------------------------------- #
-@app.get("/api/audios", response_model=AudioList)
+@app.get("/api/audios", response_model=AudioList, dependencies=AUTH)
 def list_audios(page: int = 1, limit: int = None, search: str = None,
                 language: str = None):
     limit = limit or settings.audio_page_size
@@ -296,7 +341,7 @@ def list_audios(page: int = 1, limit: int = None, search: str = None,
     return AudioList(**data)
 
 
-@app.get("/api/audios/stream")
+@app.get("/api/audios/stream", dependencies=AUTH)
 def stream_audio(url: str):
     """Proxy a clip's bytes (server-side key) so the browser can preview it."""
     try:
@@ -313,7 +358,7 @@ def stream_audio(url: str):
 # --------------------------------------------------------------------------- #
 # Text-to-speech (single clip) — type text, get one audio file (≤ CHAR_LIMIT chars)
 # --------------------------------------------------------------------------- #
-@app.post("/api/tts", response_model=TTSCreateResponse)
+@app.post("/api/tts", response_model=TTSCreateResponse, dependencies=AUTH)
 def synthesize_text(body: TTSCreateRequest):
     """Synthesize one piece of text (≤ ``CHAR_LIMIT`` characters) to a single audio clip.
 
@@ -364,7 +409,8 @@ def _safe_cleanup() -> None:
         log.exception("cleanup_old failed (continuing)")
 
 
-@app.get("/api/sessions/{session_id}/status", response_model=StatusResponse)
+@app.get("/api/sessions/{session_id}/status", response_model=StatusResponse,
+         dependencies=AUTH)
 def get_status(session_id: str):
     meta = _require_session(session_id)
     return StatusResponse(
@@ -380,14 +426,14 @@ def get_status(session_id: str):
     )
 
 
-@app.get("/api/sessions", response_model=SessionList)
+@app.get("/api/sessions", response_model=SessionList, dependencies=AUTH)
 def list_all(page: int = 1, limit: int = 20, status: str = None, search: str = None):
     results, total = sessions.list_sessions(
         page=page, limit=limit, status=status, search=search)
     return SessionList(count=total, page=page, limit=limit, results=results)
 
 
-@app.patch("/api/sessions/{session_id}")
+@app.patch("/api/sessions/{session_id}", dependencies=AUTH)
 def rename_session(session_id: str, body: RenameRequest):
     _require_session(session_id)
     title = body.title.strip()[:120]
@@ -397,7 +443,7 @@ def rename_session(session_id: str, body: RenameRequest):
     return {"session_id": session_id, "title": title}
 
 
-@app.delete("/api/sessions/{session_id}")
+@app.delete("/api/sessions/{session_id}", dependencies=AUTH)
 def delete_one(session_id: str):
     _require_session(session_id)
     sessions.delete_session(session_id)
@@ -407,14 +453,14 @@ def delete_one(session_id: str):
 # --------------------------------------------------------------------------- #
 # Dashboard: stats + account balance
 # --------------------------------------------------------------------------- #
-@app.get("/api/stats", response_model=StatsResponse)
+@app.get("/api/stats", response_model=StatsResponse, dependencies=AUTH)
 def get_stats():
     s = db.stats()
     s["queue_depth"] = manager.queue_depth()
     return StatsResponse(**s)
 
 
-@app.get("/api/account", response_model=AccountResponse)
+@app.get("/api/account", response_model=AccountResponse, dependencies=AUTH)
 def get_account():
     bal = aisha.get_balance()
     if not bal:
@@ -425,7 +471,7 @@ def get_account():
 # --------------------------------------------------------------------------- #
 # Video download / stream (range-enabled via FileResponse)
 # --------------------------------------------------------------------------- #
-@app.get("/api/sessions/{session_id}/video")
+@app.get("/api/sessions/{session_id}/video", dependencies=AUTH)
 def get_video(session_id: str, download: bool = False):
     _require_session(session_id)
     path = sessions.output_path(session_id)

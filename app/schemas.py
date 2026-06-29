@@ -164,3 +164,66 @@ class HealthResponse(BaseModel):
     ffmpeg: bool
     ffprobe: bool
     queue_depth: int
+
+
+# --------------------------------------------------------------------------- #
+# Auth / user management
+# --------------------------------------------------------------------------- #
+class UserRole(str, Enum):
+    user = "user"
+    admin = "admin"
+    super_admin = "super_admin"
+
+
+# Usernames: 3–50 chars, letters/digits/._- (case-insensitive uniqueness in db).
+# Passwords: 8–72 chars (bcrypt only hashes the first 72 bytes).
+_USERNAME = Field(..., min_length=3, max_length=50, pattern=r"^[A-Za-z0-9._-]+$")
+_PASSWORD = Field(..., min_length=8, max_length=72)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+    password: str = Field(..., min_length=1, max_length=72)
+
+
+class UserPublic(BaseModel):
+    """A user as exposed to API callers — never includes the password hash."""
+    id: str
+    username: str
+    role: UserRole = UserRole.user
+    is_active: bool = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by: Optional[str] = None
+    last_login_at: Optional[str] = None
+
+
+class LoginResponse(BaseModel):
+    token: str
+    expires_at: str
+    user: UserPublic
+
+
+class UserCreate(BaseModel):
+    username: str = _USERNAME
+    password: str = _PASSWORD
+    # Requested role; an 'admin' caller is downgraded to 'user' in the route.
+    role: UserRole = UserRole.user
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=50,
+                                    pattern=r"^[A-Za-z0-9._-]+$")
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+
+
+class PasswordResetRequest(BaseModel):
+    new_password: str = _PASSWORD
+
+
+class UserList(BaseModel):
+    count: int            # total matching (across all pages)
+    page: int = 1
+    limit: int = 20
+    results: List[UserPublic]

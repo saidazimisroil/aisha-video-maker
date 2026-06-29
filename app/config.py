@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     session_max_age_hours: int = Field(24, alias="SESSION_MAX_AGE_HOURS")
     session_max_count: int = Field(50, alias="SESSION_MAX_COUNT")
 
+    # --- Auth / user management ------------------------------------------ #
+    # How long a login (bearer token) stays valid before auto-logout.
+    auth_token_ttl_hours: int = Field(24, alias="AUTH_TOKEN_TTL_HOURS")
+    # First-run seed: if the users table is empty a single super_admin is created.
+    # Leave the password blank to have one generated and logged once at startup.
+    bootstrap_admin_username: str = Field("superadmin", alias="BOOTSTRAP_ADMIN_USERNAME")
+    bootstrap_admin_password: str = Field("", alias="BOOTSTRAP_ADMIN_PASSWORD")
+    # Interactive API docs (/docs, /redoc, /openapi.json). Off by default so they
+    # are hidden from normal & unauthenticated users; enable only in trusted envs.
+    docs_enabled: bool = Field(False, alias="AISHA_DOCS_ENABLED")
+
     # --- CORS (split frontend) ------------------------------------------ #
     # Comma-separated list of allowed browser origins. "*" allows any (dev only).
     allowed_origins: str = Field("*", alias="AISHA_ALLOWED_ORIGINS")

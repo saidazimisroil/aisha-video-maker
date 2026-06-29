@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const LINKS = [
   { to: "/", icon: "📊", label: "Overview", end: true },
@@ -9,7 +10,11 @@ const LINKS = [
   { to: "/history", icon: "🗂️", label: "Video History" },
 ];
 
+const ROLE_LABEL = { user: "User", admin: "Admin", super_admin: "Super admin" };
+
 export default function Sidebar() {
+  const { user, isAdmin, logout } = useAuth();
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -27,6 +32,24 @@ export default function Sidebar() {
           {l.label}
         </NavLink>
       ))}
+      {isAdmin && (
+        // Plain anchor: /admin is outside the app's router layout (its own surface).
+        <a className="nav-link" href="/admin">
+          <span className="ico">🔐</span>
+          Admin
+        </a>
+      )}
+
+      {user && (
+        <div className="sidebar-user">
+          <div className="su-name">{user.username}</div>
+          <div className="su-role muted small">{ROLE_LABEL[user.role] || user.role}</div>
+          <button className="btn sm mt" onClick={logout} style={{ width: "100%" }}>
+            Log out
+          </button>
+        </div>
+      )}
+
       <div className="sidebar-foot">
         Powered by the{" "}
         <a href="https://space.aisha.group/documentation" target="_blank" rel="noopener">

@@ -97,6 +97,27 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (session_id, slide_index),
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id            TEXT PRIMARY KEY,
+            username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            role          TEXT NOT NULL DEFAULT 'user',
+            is_active     INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
+            created_by    TEXT,
+            last_login_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
         """
     )
     conn.commit()
@@ -389,3 +410,193 @@ def migrate_legacy_meta() -> int:
     if inserted:
         log.info("Migrated %d legacy session(s) from meta.json into SQLite.", inserted)
     return inserted
+
+
+# --------------------------------------------------------------------------- #
+# Users (auth + role management). Distinct from the video "sessions" above.
+# --------------------------------------------------------------------------- #
+# Columns safe to return to API callers — password_hash is deliberately omitted.
+_USER_PUBLIC_COLS = (
+    "id", "username", "role", "is_active",
+    "created_at", "updated_at", "created_by", "last_login_at",
+)
+# Columns a caller may update via update_user (id/created_at are immutable).
+_USER_MUTABLE = {"username", "password_hash", "role", "is_active", "last_login_at"}
+
+
+def _user_public(row: sqlite3.Row | dict) -> dict:
+    """Strip password_hash and coerce is_active to bool for API responses."""
+    d = dict(row)
+    d.pop("password_hash", None)
+    if "is_active" in d:
+        d["is_active"] = bool(d["is_active"])
+    return d
+
+
+def insert_user(row: dict) -> None:
+    """Insert a new user. ``row`` must carry id, username, password_hash, role."""
+    now = _now()
+    full = {
+        "id": row["id"],
+        "username": row["username"],
+        "password_hash": row["password_hash"],
+        "role": row.get("role", "user"),
+        "is_active": 1 if row.get("is_active", 1) else 0,
+        "created_at": row.get("created_at", now),
+        "updated_at": row.get("updated_at", now),
+        "created_by": row.get("created_by"),
+        "last_login_at": row.get("last_login_at"),
+    }
+    cols = list(full)
+    placeholders = ",".join("?" for _ in cols)
+    with _LOCK:
+        conn = get_conn()
+        conn.execute(
+            f"INSERT INTO users ({','.join(cols)}) VALUES ({placeholders})",
+            [full[c] for c in cols])
+        conn.commit()
+
+
+def get_user_by_id(user_id: str) -> Optional[dict]:
+    """Full user row (incl. password_hash) for internal use; None if absent."""
+    with _LOCK:
+        row = get_conn().execute(
+            "SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_username(username: str) -> Optional[dict]:
+    """Full user row (incl. password_hash) for login; None if absent. Case-insensitive."""
+    with _LOCK:
+        row = get_conn().execute(
+            "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_users(page: int = 1, limit: int = 20, search: Optional[str] = None,
+               role: Optional[str] = None) -> Tuple[List[dict], int]:
+    """Return (public_summaries, total_matching). Newest first, paginated."""
+    page = max(1, page)
+    limit = max(1, min(limit, 200))
+    where, params = [], []
+    if role:
+        where.append("role = ?")
+        params.append(role)
+    if search:
+        where.append("username LIKE ?")
+        params.append(f"%{search}%")
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    cols = ", ".join(_USER_PUBLIC_COLS)
+    with _LOCK:
+        conn = get_conn()
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM users{clause}", params).fetchone()["n"]
+        rows = conn.execute(
+            f"SELECT {cols} FROM users{clause} "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, (page - 1) * limit]).fetchall()
+    return [_user_public(r) for r in rows], total
+
+
+def update_user(user_id: str, **changes) -> None:
+    """Update whitelisted columns (username/password_hash/role/is_active/last_login_at)."""
+    changes = {k: v for k, v in changes.items() if k in _USER_MUTABLE}
+    if "is_active" in changes:
+        changes["is_active"] = 1 if changes["is_active"] else 0
+    if not changes:
+        return
+    changes["updated_at"] = _now()
+    sets = ", ".join(f"{c}=?" for c in changes)
+    values = list(changes.values()) + [user_id]
+    with _LOCK:
+        conn = get_conn()
+        conn.execute(f"UPDATE users SET {sets} WHERE id=?", values)
+        conn.commit()
+
+
+def set_password_hash(user_id: str, password_hash: str) -> None:
+    update_user(user_id, password_hash=password_hash)
+
+
+def set_last_login(user_id: str) -> None:
+    update_user(user_id, last_login_at=_now())
+
+
+def delete_user(user_id: str) -> None:
+    with _LOCK:
+        conn = get_conn()
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+
+
+def count_users() -> int:
+    with _LOCK:
+        return get_conn().execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+
+
+def count_active_super_admins() -> int:
+    """How many enabled super_admins exist (drives last-super-admin guard rails)."""
+    with _LOCK:
+        return get_conn().execute(
+            "SELECT COUNT(*) AS n FROM users "
+            "WHERE role='super_admin' AND is_active=1").fetchone()["n"]
+
+
+# --------------------------------------------------------------------------- #
+# Auth sessions (opaque bearer tokens, stored as their sha256 hash).
+# --------------------------------------------------------------------------- #
+def insert_auth_session(token_hash: str, user_id: str, expires_at: str) -> None:
+    with _LOCK:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO auth_sessions (token_hash, user_id, created_at, expires_at) "
+            "VALUES (?,?,?,?)", (token_hash, user_id, _now(), expires_at))
+        conn.commit()
+
+
+def get_auth_session(token_hash: str) -> Optional[dict]:
+    """Return the joined user (public + is_active raw) for a *non-expired* token.
+
+    Expired/inactive tokens return None; an expired row is deleted opportunistically.
+    """
+    now = _now()
+    with _LOCK:
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT s.expires_at AS expires_at, u.* FROM auth_sessions s "
+            "JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
+            (token_hash,)).fetchone()
+        if row is None:
+            return None
+        if row["expires_at"] <= now:
+            conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (token_hash,))
+            conn.commit()
+            return None
+    d = dict(row)
+    d["is_active"] = bool(d["is_active"])
+    return d
+
+
+def delete_auth_session(token_hash: str) -> None:
+    with _LOCK:
+        conn = get_conn()
+        conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (token_hash,))
+        conn.commit()
+
+
+def delete_auth_sessions_for_user(user_id: str) -> None:
+    """Revoke every active token for a user (used on password reset / deactivation)."""
+    with _LOCK:
+        conn = get_conn()
+        conn.execute("DELETE FROM auth_sessions WHERE user_id=?", (user_id,))
+        conn.commit()
+
+
+def purge_expired_auth_sessions() -> int:
+    """Delete all expired tokens (called on startup). Returns rows removed."""
+    with _LOCK:
+        conn = get_conn()
+        cur = conn.execute(
+            "DELETE FROM auth_sessions WHERE expires_at <= ?", (_now(),))
+        conn.commit()
+    return cur.rowcount or 0
