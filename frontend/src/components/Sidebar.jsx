@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import BalanceCard from "./BalanceCard.jsx";
 
 const LINKS = [
@@ -15,6 +16,7 @@ const ROLE_LABEL = { user: "User", admin: "Admin", super_admin: "Super admin" };
 
 export default function Sidebar() {
   const { user, isAdmin, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <aside className="sidebar">
@@ -47,6 +49,14 @@ export default function Sidebar() {
         <div className="sidebar-user">
           <div className="su-name">{user.username}</div>
           <div className="su-role muted small">{ROLE_LABEL[user.role] || user.role}</div>
+          <button
+            className="btn sm mt theme-toggle"
+            onClick={toggleTheme}
+            style={{ width: "100%" }}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          >
+            {theme === "light" ? "🌙 Dark" : "☀️ Light"}
+          </button>
           <button className="btn sm mt" onClick={logout} style={{ width: "100%" }}>
             Log out
           </button>

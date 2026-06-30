@@ -5,6 +5,17 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🎬</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aisha Video Maker</title>
+    <script>
+      // Apply the saved/OS theme before first paint so there's no flash of the wrong theme.
+      // Mirrors getInitialTheme() in src/context/ThemeContext.jsx.
+      (function () {
+        var t = localStorage.getItem("theme");
+        if (t !== "light" && t !== "dark") {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        if (t === "light") document.documentElement.classList.add("theme-light");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

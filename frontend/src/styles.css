@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0f1420;
   --card: #1a2233;
   --card-2: #222c42;
@@ -14,6 +15,22 @@
   --sidebar-w: 240px;
 }
 
+/* Light theme: toggled by adding .theme-light to <html> (see ThemeContext + index.html). */
+html.theme-light {
+  color-scheme: light;
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --card-2: #eef1f7;
+  --text: #1a2233;
+  --muted: #5b6678;
+  --accent: #2f6fe0;
+  --accent-2: #1f57bd;
+  --error: #d64545;
+  --ok: #1f9d6b;
+  --warn: #c97a10;
+  --border: #d5dbe8;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -22,6 +39,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -265,3 +283,6 @@ audio { width: 100%; height: 36px; margin-top: 8px; }
   margin-top: auto; padding: 12px 10px; border-top: 1px solid var(--border);
 }
 .su-name { font-weight: 700; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; }
+
+/* Theme toggle button (sidebar). Reuses .btn .sm; just align icon + label. */
+.theme-toggle { display: flex; align-items: center; justify-content: center; gap: 6px; }
