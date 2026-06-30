@@ -6,6 +6,14 @@ export function fmtSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+// Money like the Aisha dashboard: space-grouped thousands, dot decimal, 2 dp ("34 007.00").
+// Intl.NumberFormat localizes the separators inconsistently, so we group by hand.
+export function fmtMoney(n) {
+  if (n == null || isNaN(n)) return "—";
+  const [int, dec] = Number(n).toFixed(2).split(".");
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, " ") + "." + dec;
+}
+
 export function fmtDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);

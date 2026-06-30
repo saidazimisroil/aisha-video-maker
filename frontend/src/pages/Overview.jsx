@@ -1,19 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getStats, getAccount, listSessions } from "../api/endpoints.js";
+import { getStats, listSessions } from "../api/endpoints.js";
 import StatCard from "../components/StatCard.jsx";
 import VideoCard from "../components/VideoCard.jsx";
 import { fmtDuration } from "../lib/format.js";
 
 export default function Overview() {
   const [stats, setStats] = useState(null);
-  const [account, setAccount] = useState(null);
   const [recent, setRecent] = useState([]);
   const [err, setErr] = useState(null);
 
   const load = () => {
     getStats().then(setStats).catch((e) => setErr(e.message));
-    getAccount().then(setAccount).catch(() => {});
     listSessions({ page: 1, limit: 5 })
       .then((d) => setRecent(d.results))
       .catch(() => {});
@@ -40,13 +38,6 @@ export default function Overview() {
         />
         <StatCard value={stats ? stats.total_slides : "—"} label="Slides rendered" />
         <StatCard value={stats ? stats.queue_depth : "—"} label="Jobs in queue" />
-        {account?.available && (
-          <StatCard
-            value={account.balance != null ? account.balance : "—"}
-            label="Aisha balance"
-            tone="accent"
-          />
-        )}
       </div>
 
       <div className="card">

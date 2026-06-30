@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import BalanceCard from "./BalanceCard.jsx";
 
 const LINKS = [
   { to: "/", icon: "📊", label: "Overview", end: true },
@@ -39,6 +40,8 @@ export default function Sidebar() {
           Admin
         </a>
       )}
+
+      <BalanceCard />
 
       {user && (
         <div className="sidebar-user">

@@ -153,11 +153,30 @@ def fetch_audio_bytes(url_or_path: str):
 # --------------------------------------------------------------------------- #
 # Account balance (best-effort)
 # --------------------------------------------------------------------------- #
+def _coerce_number(value):
+    """Return ``value`` as a float, accepting ints, floats, and numeric strings like
+    ``"34007.00"`` or ``"34 007.00"`` (the dashboard renders space-grouped). Bools and
+    non-numeric strings yield ``None``."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(" ", "").replace(" ", "").replace(",", "")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 def _extract_balance(body):
     if isinstance(body, dict):
         for key in _BALANCE_KEYS:
-            if key in body and isinstance(body[key], (int, float)):
-                return float(body[key])
+            if key in body:
+                num = _coerce_number(body[key])
+                if num is not None:
+                    return num
         # one level of nesting (e.g. {"account": {"balance": ...}})
         for v in body.values():
             if isinstance(v, dict):
